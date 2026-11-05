@@ -45,6 +45,10 @@ brew trust agent-sync-sh/tap   # Homebrew 6 refuses to load untrusted third-part
 brew install agent-sync
 ```
 
+To build and install from a checkout instead, see
+[docs/build-and-install.md](docs/build-and-install.md) for the local build,
+install location, cross-building and the pre-commit gate.
+
 ## Use
 
 ```sh
