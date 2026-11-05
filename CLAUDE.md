@@ -38,6 +38,7 @@ The avoid-list is enforced by `tests/vocabulary.rs` against string literals in
 | Question | Source |
 | --- | --- |
 | What does a word mean? | `CONTEXT.md` |
+| How is it configured, and which env vars matter? | `docs/configuration.md` |
 | Why is the design this way? | `docs/adr/0001`–`0009`, `DECISIONS.md` |
 | What is the current version building? | highest `.scratch/agentstow-v*/spec.md` |
 | What is left to do? | `.scratch/<effort>/issues/NN-*.md` |

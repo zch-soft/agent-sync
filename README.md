@@ -117,6 +117,9 @@ lock — agent-sync's only machine state — lives in `$XDG_STATE_HOME/agent-syn
 warns — native readers won't follow), `AGENT_SYNC_TARGET_ROOT` resolves everything against
 another root, `AGENT_SYNC_LOCK_TIMEOUT_MS` bounds the lock wait.
 
+Every key and environment variable, with its defaults and error behavior, is in
+[docs/configuration.md](docs/configuration.md).
+
 ## What it does not do
 
 No cross-machine sync — version the Commons with git or chezmoi. No undo — refusals come
