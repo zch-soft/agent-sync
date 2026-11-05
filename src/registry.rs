@@ -528,6 +528,27 @@ pub const AGENTS: &[Agent] = &[
         agents: Agents::None,
         hooks: Hooks::None,
     },
+    Agent {
+        name: "workbuddy",
+        root: ".workbuddy",
+        // WorkBuddy (Tencent's agent runtime) loads skill directories from
+        // ~/.workbuddy/skills/ and keeps MCP in ~/.workbuddy/mcp.json under the
+        // standard mcpServers shape (verified 2026-10-17 on Windows: a skill
+        // directory reached through a junction loads on app restart). Its user
+        // surface is skills plus MCP only — no commands, agent-file or hook
+        // directory exists beside them.
+        skills: Skills::FanOut(".workbuddy/skills"),
+        instructions: &[],
+        mcp: Mcp::KeyMerge {
+            file: ".workbuddy/mcp.json",
+            root_key: "mcpServers",
+            format: Format::Json,
+            dialect: McpDialect::Standard,
+        },
+        commands: Commands::None,
+        agents: Agents::None,
+        hooks: Hooks::None,
+    },
 ];
 
 /// Look up a registry row by name.

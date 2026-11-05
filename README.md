@@ -66,11 +66,11 @@ actionable, 1 error) — `sync --dry-run` previews, it does not gate.
 ## Agents
 
 Claude Code, Codex, opencode, pi, oh-my-pi, OpenClaw, Hermes, Gemini CLI, Cursor, Windsurf,
-Roo and Cline. Detection is simply whether the agent's config directory exists — agent-sync
-never creates one. Agents that read `~/.agents/skills` natively (Codex, opencode, oh-my-pi,
-Gemini CLI, Cursor) get no skill links written, because nothing needs to be — and where an
-agent still reads its old fan-out directory beside the Commons (Codex, Cursor), `sync`
-prunes agent-sync's now-duplicate links from it.
+Roo, Cline and WorkBuddy. Detection is simply whether the agent's config directory exists —
+agent-sync never creates one. Agents that read `~/.agents/skills` natively (Codex, opencode,
+oh-my-pi, Gemini CLI, Cursor) get no skill links written, because nothing needs to be — and
+where an agent still reads its old fan-out directory beside the Commons (Codex, Cursor),
+`sync` prunes agent-sync's now-duplicate links from it.
 
 ## Interop
 
