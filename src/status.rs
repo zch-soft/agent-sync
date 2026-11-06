@@ -4,7 +4,7 @@
 //! 2 something actionable, 1 the command could not answer.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
@@ -257,6 +257,15 @@ fn human(
     }
 }
 
+/// The raw text a symlink stores and the absolute path it resolves to under the
+/// same lexical rules classification uses. `None` when the entry is not a link,
+/// which is exactly when there is nothing to report.
+fn link_details(path: &Path) -> Option<(String, PathBuf)> {
+    let text = fs::read_link(path).ok()?;
+    let resolved = link::resolve_link(path, &text);
+    Some((text.display().to_string(), resolved))
+}
+
 /// Where a Foreign link points, for the human report. Its name says nothing
 /// about the destination, and the destination is the one fact a user needs to
 /// decide what to do with it. Resolution is lexical, exactly like the
@@ -266,8 +275,7 @@ fn foreign_target(item: &Item) -> Option<PathBuf> {
     if item.state != State::Foreign {
         return None;
     }
-    let text = fs::read_link(&item.path).ok()?;
-    Some(link::resolve_link(&item.path, &text))
+    link_details(&item.path).map(|(_, resolved)| resolved)
 }
 
 fn as_value(
@@ -286,11 +294,16 @@ fn as_value(
                 .items
                 .iter()
                 .map(|i| {
-                    json!({
+                    let mut entry = json!({
                         "name": i.name,
                         "state": i.state.label(),
                         "actionable": i.state.actionable(),
-                    })
+                    });
+                    if let Some((text, resolved)) = link_details(&i.path) {
+                        entry["link"] = json!(text);
+                        entry["resolved"] = json!(resolved.display().to_string());
+                    }
+                    entry
                 })
                 .collect();
             json!({

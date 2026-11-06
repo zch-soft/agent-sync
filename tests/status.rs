@@ -149,6 +149,52 @@ fn json_carries_the_same_facts_on_a_clean_stdout() {
     assert_eq!(state_of("deleted").as_deref(), Some("dangling"));
 }
 
+fn claude_skill_entry<'a>(parsed: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
+    parsed["targets"]
+        .as_array()
+        .expect("targets array")
+        .iter()
+        .find(|t| t["agent"] == "claude" && t["family"] == "skills")
+        .expect("claude skills target")["entries"]
+        .as_array()
+        .expect("entries array")
+        .iter()
+        .find(|e| e["name"] == name)
+        .expect("skill entry")
+}
+
+#[test]
+fn json_names_a_links_text_and_resolved_target() {
+    let f = machine();
+    f.commons_skill("research");
+
+    let before = f.run(&["status", "--json"]);
+    let parsed: serde_json::Value = serde_json::from_str(&before.stdout).unwrap();
+    let missing = claude_skill_entry(&parsed, "research");
+    assert!(missing.get("link").is_none(), "a missing entry has no link");
+    assert!(missing.get("resolved").is_none());
+
+    f.run(&["sync"]).assert_clean();
+    let after = f.run(&["status", "--json"]);
+    let parsed: serde_json::Value = serde_json::from_str(&after.stdout).unwrap();
+    let linked = claude_skill_entry(&parsed, "research");
+
+    let raw = linked["link"].as_str().expect("the raw link text");
+    assert_eq!(
+        raw.replace('\\', "/"),
+        f.link_text(".claude/skills/research")
+    );
+    let resolved = linked["resolved"].as_str().expect("the resolved path");
+    assert_eq!(
+        resolved,
+        f.commons()
+            .join("skills")
+            .join("research")
+            .display()
+            .to_string()
+    );
+}
+
 #[test]
 fn json_stays_parseable_when_there_are_warnings() {
     let f = machine();

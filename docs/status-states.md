@@ -2,7 +2,9 @@
 
 `agent-sync status` surveys five surfaces. Each has its own state vocabulary, and the
 same words appear in the human report and in `status --json`, where every entry carries
-`state` and `actionable`.
+`state` and `actionable`. A symlink entry also carries `link`, the text stored in the
+link, and `resolved`, the absolute path it resolves to; an entry with no link on disk
+(`missing`, or a Variant) omits both.
 
 The link families print every entry that is not `linked` and summarize the rest as
 `N linked`. The instructions, MCP, hooks and rendered-command surfaces print every
