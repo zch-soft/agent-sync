@@ -85,9 +85,11 @@ fn a_foreign_link_is_reported_without_demanding_action() {
     std::fs::create_dir_all(&elsewhere).unwrap();
     f.symlink(".claude/skills/thing", &elsewhere.display().to_string());
 
+    let target = elsewhere.display().to_string();
     f.run(&["status"])
         .assert_code(0)
-        .assert_stdout_has("foreign");
+        .assert_stdout_has("foreign")
+        .assert_stdout_has(&target);
 }
 
 #[test]

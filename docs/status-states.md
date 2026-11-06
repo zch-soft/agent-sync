@@ -22,6 +22,9 @@ item. `sync` acts only on the states marked **actionable** below, with the one
 | `variant` | A real file or directory shadows the Commons entry and differs from it. The difference is deliberate. | Nothing. A Variant is never clobbered. |
 | `foreign` | A symlink resolving outside the Commons. | Nothing. It is somebody else's. |
 
+For a `foreign` link the human report also prints the absolute path the link
+resolves to, since the name alone says nothing about the destination.
+
 ## instructions (AGENTS.md)
 
 | State | Meaning | `sync` |

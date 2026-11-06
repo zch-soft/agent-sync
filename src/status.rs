@@ -3,6 +3,9 @@
 //! Read-only. The exit code is the contract automation depends on: 0 clean,
 //! 2 something actionable, 1 the command could not answer.
 
+use std::fs;
+use std::path::PathBuf;
+
 use serde_json::{Value, json};
 
 use crate::commons::{self, Commons};
@@ -177,8 +180,11 @@ fn human(
             target.agent, target.dir
         ));
         for item in noteworthy {
+            let suffix = foreign_target(item)
+                .map(|path| format!(" → {}", path.display()))
+                .unwrap_or_default();
             r.line(format!(
-                "  {:<17} {} — {}",
+                "  {:<17} {} — {}{suffix}",
                 item.state.label(),
                 item.name,
                 item.state.note()
@@ -249,6 +255,19 @@ fn human(
             "{actionable} items need attention — run `agent-sync sync`."
         ));
     }
+}
+
+/// Where a Foreign link points, for the human report. Its name says nothing
+/// about the destination, and the destination is the one fact a user needs to
+/// decide what to do with it. Resolution is lexical, exactly like the
+/// classification that produced Foreign, so a dangling link still reports the
+/// path it was written against.
+fn foreign_target(item: &Item) -> Option<PathBuf> {
+    if item.state != State::Foreign {
+        return None;
+    }
+    let text = fs::read_link(&item.path).ok()?;
+    Some(link::resolve_link(&item.path, &text))
 }
 
 fn as_value(
