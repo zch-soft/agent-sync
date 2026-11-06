@@ -68,6 +68,11 @@ anything else is **copied** in. To gate CI on drift use `status` (exit 0 clean, 
 actionable, 1 error) — `sync --dry-run` previews, it does not gate. Every state
 `status` prints is defined in [docs/status-states.md](docs/status-states.md).
 
+Each shared surface is synced by a different mechanism — links, rendered files,
+key-merges, or native discovery — and each agent's instructions route decides how it
+reaches `AGENTS.md`. Both are described in
+[docs/sync-mechanisms.md](docs/sync-mechanisms.md).
+
 ## Agents
 
 Claude Code, Codex, opencode, pi, oh-my-pi, OpenClaw, Hermes, Gemini CLI, Cursor, Windsurf,
