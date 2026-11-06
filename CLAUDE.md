@@ -43,6 +43,7 @@ The avoid-list is enforced by `tests/vocabulary.rs` against string literals in
 | Why is the design this way? | `docs/adr/0001`–`0009`, `DECISIONS.md` |
 | What is the current version building? | highest `.scratch/agentstow-v*/spec.md` |
 | What is left to do? | `.scratch/<effort>/issues/NN-*.md` |
+| What does a `status` state mean? | `docs/status-states.md` |
 | How is a release cut and verified? | `docs/release-runbook.md` |
 
 `DECISIONS.md` is append-only. Record calls the spec did not settle as a dated

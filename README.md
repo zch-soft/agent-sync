@@ -65,7 +65,8 @@ agent-sync mcp list | adopt | remove | enable | disable
 directory is **moved** into the Commons with a link left behind; a path inside a git repo
 becomes a **Sourced** entry — the Commons links out to it and the repo keeps the truth;
 anything else is **copied** in. To gate CI on drift use `status` (exit 0 clean, 2
-actionable, 1 error) — `sync --dry-run` previews, it does not gate.
+actionable, 1 error) — `sync --dry-run` previews, it does not gate. Every state
+`status` prints is defined in [docs/status-states.md](docs/status-states.md).
 
 ## Agents
 
