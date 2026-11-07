@@ -2365,3 +2365,25 @@ which only `adopt` re-links. It predates this release. The same
 Decided-by: human (release, verify, roll out, tidy); agent (minor bump,
 changing the hourly check before the tag, the e2e step, the canary gate and
 host order)
+
+## 2026-11-06 — Selective sync narrows by agent, alternate root, surface and item
+
+`sync` gains `--agent`, `--root`, `--only` and `--strict`. `--only` is a combined
+selector (`family[:item,...]`, repeatable); `commands` covers both fan-out and rendered
+commands, and a hook item is an event. `--root` applies to exactly one `--agent` and may
+repeat, producing one Target per profile. The alternate root is applied to every path of
+that agent: paths under its registry root lose that prefix, paths outside it are still
+placed under the alternate root, so Claude's `.claude.json` becomes
+`<root>/.claude.json`. Custom Targets refuse `--root` because their root is already in
+config. A narrowed run surveys only the selection; `--strict` audits every detected
+Target and every surface before writing, and any problem blocks the run while writes
+still come only from the selection. Native surfaces stay where the agent hardcodes them.
+
+Evidence: no earlier spec or ADR covered selective sync. The request asked for agent,
+root, family and item selection, including profiles of agents such as Hermes, and
+`tests/selective_sync.rs` pins selection, root rebasing, strict auditing and a filtered
+`--dry-run` matching the filtered run.
+
+Decided-by: human (selector shape, one agent with multiple roots, every path under the
+alternate root, local by default with `--strict`); agent (validation order, filtering
+layers, labels, test set)

@@ -13,9 +13,10 @@
 //! That is the distinction from the MCP rule against markers: there a marker
 //! would have had to live inside data the agent parses as configuration.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use crate::commons::Commons;
+use crate::commons::{Commons, Entry};
 use crate::config::Config;
 use crate::env::Env;
 use crate::registry::{Commands, Format};
@@ -110,19 +111,36 @@ pub struct Survey {
 /// A Commons command that cannot be read or rendered is collected into
 /// `problems` rather than returned at first hit, so one run names every fault.
 pub fn survey(env: &Env, config: &Config, commons: &Commons) -> Survey {
+    survey_for(env, &target::resolve(env, config), commons, None)
+}
+
+/// [`survey`] over a chosen Target list, optionally narrowed to named commands.
+/// With an item filter, only the selected commands render and orphan discovery
+/// is skipped: an orphan has no Commons name to select.
+pub fn survey_for(
+    env: &Env,
+    targets: &[target::Target],
+    commons: &Commons,
+    only: Option<&BTreeSet<String>>,
+) -> Survey {
     let scan = commons.scan(crate::family::Family::Commands);
     let mut survey = Survey::default();
+    let entries: Vec<&Entry> = scan
+        .entries
+        .iter()
+        .filter(|entry| only.is_none_or(|only| crate::select::matches_entry(entry, only)))
+        .collect();
 
-    for target in target::resolve(env, config) {
+    for target in targets {
         let Some(agent) = target.agent else {
             continue;
         };
         let Commands::Render { dir, format } = agent.commands else {
             continue;
         };
-        let dir = env.in_home(dir);
+        let dir = target.path(env, dir);
 
-        for entry in &scan.entries {
+        for entry in &entries {
             let source = match std::fs::read_to_string(&entry.path) {
                 Ok(source) => source,
                 Err(e) => {
@@ -150,7 +168,7 @@ pub fn survey(env: &Env, config: &Config, commons: &Commons) -> Survey {
             };
 
             survey.items.push(Item {
-                target: target.name.clone(),
+                target: target.label(env),
                 name: entry.name.clone(),
                 path,
                 state,
@@ -159,7 +177,11 @@ pub fn survey(env: &Env, config: &Config, commons: &Commons) -> Survey {
         }
 
         // Files we generated whose Commons entry has gone. Safe to remove: the
-        // Marker is proof we wrote them.
+        // Marker is proof we wrote them. An item filter cannot name an orphan,
+        // so this whole-family work is skipped for a narrowed selection.
+        if only.is_some() {
+            continue;
+        }
         let wanted: Vec<String> = scan.entries.iter().map(|e| e.name.clone()).collect();
         if let Ok(read) = std::fs::read_dir(&dir) {
             for found in read.flatten() {
@@ -178,7 +200,7 @@ pub fn survey(env: &Env, config: &Config, commons: &Commons) -> Survey {
                     continue;
                 }
                 survey.items.push(Item {
-                    target: target.name.clone(),
+                    target: target.label(env),
                     name,
                     path,
                     state: State::Orphaned,
@@ -187,7 +209,6 @@ pub fn survey(env: &Env, config: &Config, commons: &Commons) -> Survey {
             }
         }
     }
-
     survey
 }
 

@@ -44,6 +44,19 @@ pub enum Issue {
     Unreadable { path: PathBuf, error: String },
 }
 
+impl Issue {
+    /// The entry this issue is about, when it names one. A family-level issue
+    /// (an unreadable directory) has no name and stays with the whole family.
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Issue::DotPrefixed { name, .. }
+            | Issue::WrongShape { name, .. }
+            | Issue::DanglingLink { name, .. } => Some(name),
+            Issue::Unreadable { .. } => None,
+        }
+    }
+}
+
 impl std::fmt::Display for Issue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

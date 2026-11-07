@@ -184,20 +184,25 @@ impl Item {
 /// Returns nothing at all when the Commons has no `AGENTS.md`: an absent family
 /// is not a problem to report, it is simply a family the user does not use.
 pub fn survey(env: &Env, config: &Config, commons_file: &Path) -> Vec<Item> {
+    survey_for(env, &target::resolve(env, config), commons_file)
+}
+
+/// [`survey`] over a chosen Target list.
+pub fn survey_for(env: &Env, targets: &[target::Target], commons_file: &Path) -> Vec<Item> {
     if !commons_file.is_file() {
         return Vec::new();
     }
 
     let mut items = Vec::new();
 
-    for target in target::resolve(env, config) {
+    for target in targets {
         let Some(chosen) = target.instructions else {
             continue;
         };
         let routes = target.agent.map_or(&[][..], |a| a.instructions);
         let item = match chosen {
             Instructions::Symlink(rel) => {
-                let mut item = link_item(&target.name, env.in_home(rel), commons_file);
+                let mut item = link_item(&target.label(env), target.path(env, rel), commons_file);
                 // The import route on this same path leaves either a file of
                 // ours, swapped for the link, or the user's own prose, which
                 // is never touched — so the note names both ways out.
@@ -217,15 +222,23 @@ pub fn survey(env: &Env, config: &Config, commons_file: &Path) -> Vec<Item> {
                 item
             }
             Instructions::RulesDirLink(dir) => {
-                let path = env.in_home(dir).join("AGENTS.md");
-                link_item(&target.name, path, commons_file)
+                let path = target.path(env, dir).join("AGENTS.md");
+                link_item(&target.label(env), path, commons_file)
             }
-            Instructions::ImportLine(rel) => import_item(&target.name, env.in_home(rel), env),
+            Instructions::ImportLine(rel) => {
+                import_item(&target.label(env), target.path(env, rel), env)
+            }
             Instructions::IncludeEntry {
                 file,
                 key,
                 keep_first,
-            } => include_item(&target.name, env.in_home(file), key, keep_first, env),
+            } => include_item(
+                &target.label(env),
+                target.path(env, file),
+                key,
+                keep_first,
+                env,
+            ),
         };
 
         // What the routes not taken left behind goes, so the agent reads the
@@ -236,7 +249,9 @@ pub fn survey(env: &Env, config: &Config, commons_file: &Path) -> Vec<Item> {
         let leftovers: Vec<Item> = routes
             .iter()
             .filter(|route| !blocked && **route != chosen)
-            .filter_map(|route| leftover_item(&target.name, *route, env, commons_file))
+            .filter_map(|route| {
+                leftover_item(&target.label(env), *route, target, env, commons_file)
+            })
             .filter(|leftover| leftover.path != item.path)
             .collect();
         items.push(item);
@@ -248,22 +263,23 @@ pub fn survey(env: &Env, config: &Config, commons_file: &Path) -> Vec<Item> {
 
 /// What a route this Target does not take left in place, if it is ours.
 fn leftover_item(
-    target: &str,
+    label: &str,
     route: Instructions,
+    target: &target::Target,
     env: &Env,
     commons_file: &Path,
 ) -> Option<Item> {
     match route {
-        Instructions::Symlink(rel) => legacy_item(target, env.in_home(rel), commons_file),
+        Instructions::Symlink(rel) => legacy_item(label, target.path(env, rel), commons_file),
         Instructions::RulesDirLink(dir) => {
-            legacy_item(target, env.in_home(dir).join("AGENTS.md"), commons_file)
+            legacy_item(label, target.path(env, dir).join("AGENTS.md"), commons_file)
         }
         Instructions::IncludeEntry {
             file,
             key,
             keep_first,
         } => {
-            let item = include_item(target, env.in_home(file), key, keep_first, env);
+            let item = include_item(label, target.path(env, file), key, keep_first, env);
             (item.state == State::ImportPresent).then_some(Item {
                 state: State::Legacy,
                 ..item

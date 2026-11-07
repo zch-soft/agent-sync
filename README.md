@@ -73,6 +73,26 @@ key-merges, or native discovery — and each agent's instructions route decides 
 reaches `AGENTS.md`. Both are described in
 [docs/sync-mechanisms.md](docs/sync-mechanisms.md).
 
+## Selective sync
+
+A bare `sync` still converges everything. Four flags narrow it:
+
+```sh
+agent-sync sync --agent claude                          # one Target
+agent-sync sync --only skills                           # one family
+agent-sync sync --only skills:research,tdd              # named items
+agent-sync sync --agent claude --only mcp:codegraph     # compose them
+agent-sync sync --agent hermes --root ~/.hermes/profiles/work
+agent-sync sync --only skills --strict                  # audit everything first
+```
+
+`--agent` and `--only` repeat; `--only FAMILY[:ITEM,...]` accepts families `skills`,
+`commands`, `agents`, `instructions`, `mcp` and `hooks`. `--root` applies to the one
+selected agent and may repeat for multiple profiles; every path of that agent moves
+under the alternate root. Unselected scope is not surveyed unless `--strict` audits it
+before writing. The complete rules are in
+[docs/selective-sync.md](docs/selective-sync.md).
+
 ## Agents
 
 Claude Code, Codex, opencode, pi, oh-my-pi, OpenClaw, Hermes, Gemini CLI, Cursor, Windsurf,

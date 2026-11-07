@@ -22,6 +22,7 @@
 //!   that needs a secret should read it from the environment itself; then the
 //!   value never reaches the config file at all.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
@@ -177,6 +178,18 @@ pub struct Survey {
 /// A fault in a Commons hook file is collected into `problems` rather than
 /// returned at first hit, so one run names every broken file.
 pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
+    survey_for(env, &target::resolve(env, config), commons_dir, None)
+}
+
+/// [`survey`] over a chosen Target list, optionally narrowed to named events.
+/// Only the selected event files are parsed, so a broken unselected file cannot
+/// block the selection.
+pub fn survey_for(
+    env: &Env,
+    targets: &[target::Target],
+    commons_dir: &Path,
+    only: Option<&BTreeSet<String>>,
+) -> Survey {
     let mut survey = Survey::default();
 
     // The presence of the directory, not of any file in it, is what says the
@@ -186,9 +199,9 @@ pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
     if !commons_dir.is_dir() {
         return survey;
     }
-    let declared = read_commons(commons_dir, &mut survey.problems);
+    let declared = read_commons(commons_dir, &mut survey.problems, only);
 
-    for target in target::resolve(env, config) {
+    for target in targets {
         let Some(agent) = target.agent else {
             continue;
         };
@@ -196,7 +209,7 @@ pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
             continue;
         };
 
-        let path = env.in_home(file);
+        let path = target.path(env, file);
         let existing = match read_agent(&path, root_key) {
             Ok(existing) => existing,
             Err(e) => {
@@ -209,7 +222,7 @@ pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
             let native_event = native_event(&target.name, &hook.event);
             let Some(native_event) = native_event else {
                 survey.items.push(Item {
-                    target: target.name.clone(),
+                    target: target.label(env),
                     event: hook.event.clone(),
                     label: hook.command.clone(),
                     path: path.clone(),
@@ -240,7 +253,7 @@ pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
             };
 
             survey.items.push(Item {
-                target: target.name.clone(),
+                target: target.label(env),
                 event: hook.event.clone(),
                 label: hook.command.clone(),
                 path: path.clone(),
@@ -254,6 +267,11 @@ pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
 
         // Anything in this agent's hooks that the Commons does not declare.
         for (event, groups) in &existing {
+            if let Some(only) = only
+                && !only.contains(event)
+            {
+                continue;
+            }
             for object in flatten(groups) {
                 let Some(command) = object.get("command").and_then(Value::as_str) else {
                     continue;
@@ -266,7 +284,7 @@ pub fn survey(env: &Env, config: &Config, commons_dir: &Path) -> Survey {
                     continue;
                 }
                 survey.items.push(Item {
-                    target: target.name.clone(),
+                    target: target.label(env),
                     event: event.clone(),
                     label: program_only(command),
                     path: path.clone(),
@@ -387,7 +405,7 @@ pub fn strip(path: &Path, root_key: &str, agent: &str, commons_dir: &Path) -> Re
     if !commons_dir.is_dir() {
         return Ok(strip);
     }
-    let declared = read_commons(commons_dir, &mut strip.problems);
+    let declared = read_commons(commons_dir, &mut strip.problems, None);
     if declared.is_empty() {
         return Ok(strip);
     }
@@ -580,11 +598,31 @@ fn render(hook: &Hook) -> Value {
     Value::Object(object)
 }
 
+/// Every event the Commons declares, by `hooks/<Event>.toml` file stem.
+/// Validation only: it does not parse the files.
+pub fn declared_events(dir: &Path) -> BTreeSet<String> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return BTreeSet::new();
+    };
+    read.flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().map(|e| e == "toml").unwrap_or(false))
+        .filter_map(|path| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
 /// Every hook the Commons declares, from `hooks/<event>.toml`.
 ///
 /// Each file's fault lands in `problems` and the scan moves on, so the user
 /// fixes one complete list rather than one broken file per run.
-fn read_commons(dir: &Path, problems: &mut Vec<String>) -> Vec<Hook> {
+fn read_commons(
+    dir: &Path,
+    problems: &mut Vec<String>,
+    only: Option<&BTreeSet<String>>,
+) -> Vec<Hook> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -598,6 +636,13 @@ fn read_commons(dir: &Path, problems: &mut Vec<String>) -> Vec<Hook> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().map(|e| e == "toml").unwrap_or(false))
+        .filter(|p| {
+            only.is_none_or(|only| {
+                p.file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .is_some_and(|stem| only.contains(&stem))
+            })
+        })
         .collect();
     files.sort();
 

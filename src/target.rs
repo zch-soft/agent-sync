@@ -4,7 +4,7 @@
 //! The registry stays pure static data; this is where it meets the machine and
 //! the config, so every command iterates the same resolved list.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::env::Env;
@@ -16,6 +16,11 @@ use crate::registry::{self, Agent, Instructions};
 pub struct Target {
     pub name: String,
     pub root: String,
+    /// The registry or config root this Target's paths are written against,
+    /// before any alternate root is applied.
+    base_root: String,
+    /// When set, every path of this agent is placed under this root.
+    root_override: Option<PathBuf>,
     /// Home-relative fan-out directory per family.
     fanout: Vec<(Family, String)>,
     /// The registry row, when this is a built-in agent. Config-defined targets
@@ -41,6 +46,8 @@ impl Target {
         Self {
             name: agent.name.to_string(),
             root: agent.root.to_string(),
+            base_root: agent.root.to_string(),
+            root_override: None,
             fanout,
             agent: Some(agent),
             instructions: config
@@ -49,6 +56,46 @@ impl Target {
                 .or(agent.instructions.first())
                 .copied(),
         }
+    }
+
+    /// The same Target, with every path rebased under an alternate config root.
+    pub fn with_root(agent: &'static Agent, config: &Config, root: PathBuf) -> Self {
+        Self {
+            root_override: Some(root),
+            ..Self::from_agent(agent, config)
+        }
+    }
+
+    /// How reports name this Target. A profile root is part of the label so two
+    /// profiles of the same agent are distinguishable.
+    pub fn label(&self, env: &Env) -> String {
+        match &self.root_override {
+            Some(root) => format!("{} ({})", self.name, Self::display_path(env, root)),
+            None => self.name.clone(),
+        }
+    }
+
+    /// Resolve one registry path for this Target. Without an alternate root
+    /// this is the old home-relative lookup. With one, a path under the agent's
+    /// own root is rebased; every other path is still profile-local, so even
+    /// Claude's `.claude.json` lands under the alternate root.
+    pub fn path(&self, env: &Env, rel: &str) -> PathBuf {
+        let Some(root) = &self.root_override else {
+            return env.in_home(rel);
+        };
+        let rel = Path::new(rel);
+        match rel.strip_prefix(Path::new(&self.base_root)) {
+            Ok(suffix) => root.join(suffix),
+            Err(_) => root.join(rel),
+        }
+    }
+
+    /// A path for a report, relative to home when it lives there.
+    pub fn display_path(env: &Env, path: &Path) -> String {
+        path.strip_prefix(env.home())
+            .unwrap_or(path)
+            .display()
+            .to_string()
     }
 
     /// The home-relative fan-out directory for a family, if this Target takes one.
@@ -67,7 +114,10 @@ impl Target {
     }
 
     pub fn detected(&self, home: &Path) -> bool {
-        home.join(&self.root).is_dir()
+        match &self.root_override {
+            Some(root) => root.is_dir(),
+            None => home.join(&self.root).is_dir(),
+        }
     }
 
     /// Capability summary for reports.
@@ -101,6 +151,8 @@ pub fn resolve(env: &Env, config: &Config) -> Vec<Target> {
         targets.push(Target {
             name: custom.name.clone(),
             root: custom.root.clone(),
+            base_root: custom.root.clone(),
+            root_override: None,
             fanout: custom.fanout.iter().map(|(f, d)| (*f, d.clone())).collect(),
             agent: None,
             instructions: None,
@@ -125,6 +177,8 @@ pub fn find(config: &Config, name: &str) -> Option<Target> {
         .map(|custom| Target {
             name: custom.name.clone(),
             root: custom.root.clone(),
+            base_root: custom.root.clone(),
+            root_override: None,
             fanout: custom.fanout.iter().map(|(f, d)| (*f, d.clone())).collect(),
             agent: None,
             instructions: None,

@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use crate::cli::SyncArgs;
 use crate::commons::{self, Commons};
 use crate::config::Config;
 use crate::env::Env;
@@ -22,7 +23,8 @@ use crate::lock;
 use crate::mcp;
 use crate::render;
 use crate::report::Reporter;
-use crate::target;
+use crate::select::{self, Selection, Surface};
+use crate::target::Target;
 use crate::{EXIT_CLEAN, EXIT_ERROR};
 
 /// Everything one run intends to do, surveyed and resolved before any write.
@@ -43,27 +45,49 @@ struct Plan {
 /// One Target directory's worth of symlink work.
 struct LinkPlan {
     agent: String,
-    dir: String,
+    dir_display: String,
     items: Vec<Item>,
 }
 
 impl Plan {
-    /// Phase 1: survey every family, read-only, collecting every problem.
-    fn build(env: &Env, config: &Config, commons: &Commons) -> Plan {
-        let targets = target::resolve(env, config);
+    /// Phase 1: survey the selected scope, read-only, collecting every problem.
+    fn build(
+        env: &Env,
+        config: &Config,
+        commons: &Commons,
+        targets: &[Target],
+        selection: &Selection,
+    ) -> Plan {
         let mut warnings = Vec::new();
         let mut links = Vec::new();
 
         for family in Family::ALL {
-            let scan = commons.scan(*family);
-            warnings.extend(scan.issues.iter().map(ToString::to_string));
+            let surface = Surface::for_family(*family);
+            if !selection.allows(surface) {
+                continue;
+            }
 
-            for target in &targets {
+            let scan = commons.scan(*family);
+            let only = selection.items(surface);
+            let entries: Vec<commons::Entry> = scan
+                .entries
+                .into_iter()
+                .filter(|entry| only.is_none_or(|only| select::matches_entry(entry, only)))
+                .collect();
+            warnings.extend(
+                scan.issues
+                    .into_iter()
+                    .filter(|issue| select::keeps_issue(issue, only))
+                    .map(|issue| issue.to_string()),
+            );
+
+            for target in targets {
                 if let Some(dir) = target.fanout_dir(*family) {
-                    let items = link::survey(&env.in_home(dir), commons.root(), &scan.entries);
+                    let path = target.path(env, dir);
+                    let items = link::survey_selected(&path, commons.root(), &entries, only);
                     links.push(LinkPlan {
-                        agent: target.name.clone(),
-                        dir: dir.to_string(),
+                        agent: target.label(env),
+                        dir_display: Target::display_path(env, &path),
                         items,
                     });
                 } else if let Some(dir) = target.legacy_dir(*family) {
@@ -71,21 +95,48 @@ impl Plan {
                     // *and* the Commons, so our links there are live
                     // duplicates. Prune-only — remove ours, create nothing,
                     // touch nothing foreign.
-                    let items = link::survey_legacy(&env.in_home(dir), commons.root());
+                    let path = target.path(env, dir);
+                    let items = link::survey_legacy_selected(&path, commons.root(), only);
                     links.push(LinkPlan {
-                        agent: target.name.clone(),
-                        dir: dir.to_string(),
+                        agent: target.label(env),
+                        dir_display: Target::display_path(env, &path),
                         items,
                     });
                 }
             }
         }
 
-        let instructions =
-            instructions::survey(env, config, &commons.root().join(commons::INSTRUCTIONS));
-        let mut mcp = mcp::survey(env, config, &commons.root().join(commons::MCP));
-        let mut rendered = render::survey(env, config, commons);
-        let mut hooks = hooks::survey(env, config, &commons.family_dir(commons::HOOKS));
+        let instructions = if selection.allows(Surface::Instructions) {
+            instructions::survey_for(env, targets, &commons.root().join(commons::INSTRUCTIONS))
+        } else {
+            Vec::new()
+        };
+        let mut mcp = if selection.allows(Surface::Mcp) {
+            mcp::survey_for(
+                env,
+                config,
+                targets,
+                &commons.root().join(commons::MCP),
+                selection.items(Surface::Mcp),
+            )
+        } else {
+            mcp::Survey::default()
+        };
+        let mut rendered = if selection.allows(Surface::Commands) {
+            render::survey_for(env, targets, commons, selection.items(Surface::Commands))
+        } else {
+            render::Survey::default()
+        };
+        let mut hooks = if selection.allows(Surface::Hooks) {
+            hooks::survey_for(
+                env,
+                targets,
+                &commons.family_dir(commons::HOOKS),
+                selection.items(Surface::Hooks),
+            )
+        } else {
+            hooks::Survey::default()
+        };
 
         let mut problems = Vec::new();
         problems.append(&mut mcp.problems);
@@ -104,10 +155,37 @@ impl Plan {
     }
 }
 
-pub fn run(env: &Env, config: &Config, r: &mut Reporter, dry_run: bool) -> i32 {
+pub fn run(env: &Env, config: &Config, r: &mut Reporter, args: &SyncArgs) -> i32 {
+    let dry_run = args.dry_run;
     let commons = Commons::new(env.commons());
     if !commons.exists() {
         r.problem(commons::missing_message(commons.root()));
+        return EXIT_ERROR;
+    }
+
+    let selection = match Selection::parse(args, env) {
+        Ok(selection) => selection,
+        Err(e) => {
+            r.problem(e);
+            return EXIT_ERROR;
+        }
+    };
+
+    let targets = match selection.resolve_targets(env, config) {
+        Ok(targets) => targets,
+        Err(errors) => {
+            for error in errors {
+                r.problem(error);
+            }
+            return EXIT_ERROR;
+        }
+    };
+
+    let item_errors = selection.validate_items(&commons);
+    if !item_errors.is_empty() {
+        for error in item_errors {
+            r.problem(error);
+        }
         return EXIT_ERROR;
     }
 
@@ -129,10 +207,57 @@ pub fn run(env: &Env, config: &Config, r: &mut Reporter, dry_run: bool) -> i32 {
         r.blank();
     }
 
-    // Phase 1 — survey everything before the first write.
-    let plan = Plan::build(env, config, &commons);
-    for warning in &plan.warnings {
-        r.warn(warning);
+    // `--strict` audits the whole machine while the selected plan still decides
+    // what is written. An audit fault blocks the run exactly like a normal
+    // survey fault; the selected survey must never hide it.
+    let audit = if selection.strict && selection.is_selective() {
+        let audit_targets = match selection.audit_targets(env, config) {
+            Ok(targets) => targets,
+            Err(errors) => {
+                for error in errors {
+                    r.problem(error);
+                }
+                return EXIT_ERROR;
+            }
+        };
+        Some(Plan::build(
+            env,
+            config,
+            &commons,
+            &audit_targets,
+            &Selection::all(),
+        ))
+    } else {
+        None
+    };
+
+    if let Some(audit) = &audit {
+        for warning in &audit.warnings {
+            r.warn(warning);
+        }
+        let skipped: Vec<&String> = audit
+            .mcp
+            .skipped
+            .iter()
+            .chain(&audit.hooks.skipped)
+            .collect();
+        if !audit.problems.is_empty() || !skipped.is_empty() {
+            for problem in &audit.problems {
+                r.problem(problem);
+            }
+            for problem in skipped {
+                r.problem(problem);
+            }
+            return EXIT_ERROR;
+        }
+    }
+
+    // Phase 1 — survey the selected scope before the first write.
+    let plan = Plan::build(env, config, &commons, &targets, &selection);
+    if audit.is_none() {
+        for warning in &plan.warnings {
+            r.warn(warning);
+        }
     }
 
     let mut changes = 0usize;
@@ -141,22 +266,16 @@ pub fn run(env: &Env, config: &Config, r: &mut Reporter, dry_run: bool) -> i32 {
         // written after MCP because Gemini keeps both in one settings file,
         // and each family re-reads it before merging.
         for link_plan in &plan.links {
-            changes += sync_target(
-                &link_plan.agent,
-                &link_plan.dir,
-                &link_plan.items,
-                env.home(),
-                r,
-                dry_run,
-            );
+            changes += sync_target(link_plan, env.home(), r, dry_run);
         }
         changes += sync_instructions(env, &plan.instructions, r, dry_run);
         changes += sync_mcp(&plan.mcp, r, dry_run);
         changes += sync_rendered(&plan.rendered, r, dry_run);
         changes += sync_hooks(&plan.hooks, r, dry_run);
     } else {
-        // A survey problem anywhere stops the whole run before its first
-        // write, so a config error can never leave a half-synced machine.
+        // A survey problem anywhere in the selection stops the whole run before
+        // its first write, so a config error can never leave a half-synced
+        // machine.
         for problem in &plan.problems {
             r.problem(problem);
         }
@@ -447,15 +566,9 @@ fn sync_instructions(
 
 /// Report — and unless this is a dry run, apply — one Target's items. Returns
 /// how many of them changed the filesystem.
-fn sync_target(
-    agent: &str,
-    dir: &str,
-    items: &[Item],
-    home: &Path,
-    r: &mut Reporter,
-    dry_run: bool,
-) -> usize {
-    let interesting: Vec<&Item> = items
+fn sync_target(plan: &LinkPlan, home: &Path, r: &mut Reporter, dry_run: bool) -> usize {
+    let interesting: Vec<&Item> = plan
+        .items
         .iter()
         .filter(|i| i.state != link::State::Linked)
         .collect();
@@ -463,7 +576,7 @@ fn sync_target(
         return 0;
     }
 
-    r.line(format!("{agent} ({dir})"));
+    r.line(format!("{} ({})", plan.agent, plan.dir_display));
     let mut changed = 0;
 
     for item in interesting {

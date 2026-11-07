@@ -18,7 +18,7 @@
 //!   *keys* that changed, never the values, so the redaction guarantee is
 //!   structural rather than a discipline applied at each call site.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
@@ -157,20 +157,42 @@ impl std::fmt::Display for Error {
 /// hit, so one run names every fault (ADR-0007); `sync` writes nothing while
 /// any exist.
 pub fn survey(env: &Env, config: &Config, commons_file: &Path) -> Survey {
+    survey_for(
+        env,
+        config,
+        &target::resolve(env, config),
+        commons_file,
+        None,
+    )
+}
+
+/// [`survey`] over a chosen Target list, optionally narrowed to named servers.
+/// Filtering happens before rendering, so an unselected server's unset
+/// `${env:VAR}` cannot block a selected one.
+pub fn survey_for(
+    env: &Env,
+    config: &Config,
+    targets: &[target::Target],
+    commons_file: &Path,
+    only: Option<&BTreeSet<String>>,
+) -> Survey {
     let mut survey = Survey::default();
     if !commons_file.is_file() {
         return survey;
     }
 
-    let servers = match read_commons(commons_file) {
+    let mut servers = match read_commons(commons_file) {
         Ok(servers) => servers,
         Err(e) => {
             survey.problems.push(e.message);
             return survey;
         }
     };
+    if let Some(only) = only {
+        servers.retain(|name, _| only.contains(name));
+    }
 
-    survey_map(env, config, &servers, &mut survey);
+    survey_map(env, config, targets, &servers, &mut survey);
     survey
 }
 
@@ -184,12 +206,24 @@ pub fn survey_one(env: &Env, config: &Config, name: &str, spec: &Value) -> Surve
     let mut survey = Survey::default();
     let mut servers = BTreeMap::new();
     servers.insert(name.to_string(), spec.clone());
-    survey_map(env, config, &servers, &mut survey);
+    survey_map(
+        env,
+        config,
+        &target::resolve(env, config),
+        &servers,
+        &mut survey,
+    );
     survey
 }
 
-fn survey_map(env: &Env, config: &Config, servers: &BTreeMap<String, Value>, survey: &mut Survey) {
-    for target in target::resolve(env, config) {
+fn survey_map(
+    env: &Env,
+    config: &Config,
+    targets: &[target::Target],
+    servers: &BTreeMap<String, Value>,
+    survey: &mut Survey,
+) {
+    for target in targets {
         let Some(agent) = target.agent else {
             continue;
         };
@@ -203,7 +237,7 @@ fn survey_map(env: &Env, config: &Config, servers: &BTreeMap<String, Value>, sur
             continue;
         };
 
-        let path = env.in_home(file);
+        let path = target.path(env, file);
         let existing_servers = match read_existing(&path, root_key, format) {
             Ok(servers) => servers,
             Err(e) => {
@@ -222,7 +256,7 @@ fn survey_map(env: &Env, config: &Config, servers: &BTreeMap<String, Value>, sur
                 // work: `sync` removes it by name.
                 if existing_servers.contains_key(name) {
                     survey.items.push(Item {
-                        target: target.name.clone(),
+                        target: target.label(env),
                         name: name.clone(),
                         path: path.clone(),
                         root_key,
@@ -240,7 +274,7 @@ fn survey_map(env: &Env, config: &Config, servers: &BTreeMap<String, Value>, sur
                 // an earlier sync already put it there.
                 if existing_servers.contains_key(name) {
                     survey.items.push(Item {
-                        target: target.name.clone(),
+                        target: target.label(env),
                         name: name.clone(),
                         path: path.clone(),
                         root_key,
@@ -278,7 +312,7 @@ fn survey_map(env: &Env, config: &Config, servers: &BTreeMap<String, Value>, sur
             };
 
             survey.items.push(Item {
-                target: target.name.clone(),
+                target: target.label(env),
                 name: name.clone(),
                 path: path.clone(),
                 root_key,
@@ -296,7 +330,7 @@ fn survey_map(env: &Env, config: &Config, servers: &BTreeMap<String, Value>, sur
                 continue;
             }
             survey.items.push(Item {
-                target: target.name.clone(),
+                target: target.label(env),
                 name: name.clone(),
                 path: path.clone(),
                 root_key,

@@ -29,6 +29,7 @@ pub mod registry;
 pub mod render;
 pub mod report;
 pub mod revert;
+pub mod select;
 pub mod status;
 pub mod sync;
 pub mod target;
@@ -102,9 +103,9 @@ pub fn run(
     // A bare invocation is `sync`, the everyday command.
     match parsed
         .command
-        .unwrap_or(cli::Command::Sync { dry_run: false })
+        .unwrap_or(cli::Command::Sync(cli::SyncArgs::default()))
     {
-        cli::Command::Sync { dry_run } => sync::run(&env, &config, &mut reporter, dry_run),
+        cli::Command::Sync(args) => sync::run(&env, &config, &mut reporter, &args),
         cli::Command::Init => init::run(&env, &config, &mut reporter),
         cli::Command::Adopt { path, dry_run } => {
             adopt::run(&env, &config, &mut reporter, &path, dry_run)

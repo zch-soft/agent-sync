@@ -294,6 +294,18 @@ pub struct Item {
 /// Commons entry that simply is not being synced right now stays, because removing
 /// it would be guessing.
 pub fn survey(target_dir: &Path, commons: &Path, entries: &[Entry]) -> Vec<Item> {
+    survey_selected(target_dir, commons, entries, None)
+}
+
+/// [`survey`] narrowed to named items. `only` limits the extra pass — dangling
+/// links of ours and foreign links — so a selected item cannot cause an
+/// unselected name to be reported or pruned.
+pub fn survey_selected(
+    target_dir: &Path,
+    commons: &Path,
+    entries: &[Entry],
+    only: Option<&BTreeSet<String>>,
+) -> Vec<Item> {
     let mut items = Vec::new();
     let wanted: BTreeSet<&str> = entries.iter().map(|e| e.file_name.as_str()).collect();
 
@@ -336,6 +348,11 @@ pub fn survey(target_dir: &Path, commons: &Path, entries: &[Entry]) -> Vec<Item>
         for found in read.flatten() {
             let name = found.file_name().to_string_lossy().into_owned();
             if wanted.contains(name.as_str()) {
+                continue;
+            }
+            if let Some(only) = only
+                && !crate::select::matches_file_name(&name, only)
+            {
                 continue;
             }
             let path = found.path();
@@ -391,13 +408,28 @@ pub fn apply(item: &Item) -> io::Result<()> {
 /// business to narrate — only to leave. An absent directory surveys empty,
 /// and nothing here ever creates one.
 pub fn survey_legacy(target_dir: &Path, commons: &Path) -> Vec<Item> {
+    survey_legacy_selected(target_dir, commons, None)
+}
+
+/// [`survey_legacy`] narrowed to named items.
+pub fn survey_legacy_selected(
+    target_dir: &Path,
+    commons: &Path,
+    only: Option<&BTreeSet<String>>,
+) -> Vec<Item> {
     let mut items = Vec::new();
     if let Ok(read) = fs::read_dir(target_dir) {
         for found in read.flatten() {
+            let name = found.file_name().to_string_lossy().into_owned();
+            if let Some(only) = only
+                && !crate::select::matches_file_name(&name, only)
+            {
+                continue;
+            }
             let path = found.path();
             if let Found::Ours { .. } = classify(&path, commons) {
                 items.push(Item {
-                    name: found.file_name().to_string_lossy().into_owned(),
+                    name,
                     path,
                     state: State::Duplicate,
                     canonical: None,

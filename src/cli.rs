@@ -20,14 +20,33 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+/// Everything one `sync` invocation can narrow. Empty vectors and tables mean
+/// the whole machine, exactly as before this struct existed.
+#[derive(clap::Args, Debug, Default)]
+pub struct SyncArgs {
+    /// Report the plan without touching the filesystem.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Sync only these Targets. Repeat the flag for more than one.
+    #[arg(long = "agent", value_name = "NAME")]
+    pub agent: Vec<String>,
+    /// Use an alternate config root for the one selected agent. Repeat for
+    /// multiple profiles of that agent.
+    #[arg(long = "root", value_name = "PATH")]
+    pub root: Vec<String>,
+    /// Sync only a surface, or named items inside it:
+    /// skills[:ITEM[,ITEM...]], commands, agents, instructions, mcp, hooks.
+    #[arg(long = "only", value_name = "FAMILY[:ITEM[,ITEM...]]")]
+    pub only: Vec<String>,
+    /// Survey every Target and surface before writing, not just the selection.
+    #[arg(long)]
+    pub strict: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Fan the Commons out to every installed agent.
-    Sync {
-        /// Report the plan without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-    },
+    Sync(SyncArgs),
     /// Create the Commons skeleton and report what this machine already has.
     Init,
     /// Take a path under management; where it lives picks the mechanic.
