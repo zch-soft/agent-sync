@@ -49,6 +49,16 @@ agent-sync sync --agent claude --only mcp:codegraph
 agent-sync sync --agent claude --agent pi --only skills:research
 ```
 
+Every `--only` selector applies to **all** agents in scope: every selected Target, or
+every detected Target when `--agent` is omitted. A selector is a global scope, not
+paired with the `--agent` that happens to precede it, so argument order does not
+matter. Both of these are the same run:
+
+```sh
+agent-sync sync --agent claude --only mcp:codegraph
+agent-sync sync --only mcp:codegraph --agent claude
+```
+
 Unknown families, empty item lists, unknown item names, and
 `--only instructions:<item>` are errors. They are reported before the lock and before
 any write.
