@@ -30,15 +30,39 @@ pub enum Surface {
 }
 
 impl Surface {
-    pub fn from_name(name: &str) -> Option<Self> {
+    const NAMES: [&'static str; 6] = [
+        "skills",
+        "commands",
+        "agents",
+        "instructions",
+        "mcp",
+        "hooks",
+    ];
+
+    /// Resolve a family name, accepting any unique case-insensitive prefix.
+    fn resolve(name: &str) -> Result<Self, String> {
+        match match_aliases(name, Self::NAMES.iter().map(|name| (*name, *name))) {
+            NameMatch::Exact(name) | NameMatch::One(name) => Ok(Self::from_exact(name)),
+            NameMatch::Many(names) => Err(format!(
+                "ambiguous --only family `{name}` — matches {}; type more characters",
+                names.join(", ")
+            )),
+            NameMatch::None => Err(format!(
+                "unknown --only family `{name}` — expected {}",
+                Self::NAMES.join(", ")
+            )),
+        }
+    }
+
+    fn from_exact(name: &str) -> Self {
         match name {
-            "skills" => Some(Self::Skills),
-            "commands" => Some(Self::Commands),
-            "agents" => Some(Self::Agents),
-            "instructions" => Some(Self::Instructions),
-            "mcp" => Some(Self::Mcp),
-            "hooks" => Some(Self::Hooks),
-            _ => None,
+            "skills" => Self::Skills,
+            "commands" => Self::Commands,
+            "agents" => Self::Agents,
+            "instructions" => Self::Instructions,
+            "mcp" => Self::Mcp,
+            "hooks" => Self::Hooks,
+            _ => unreachable!("resolved from the known surface names"),
         }
     }
 
@@ -218,19 +242,21 @@ impl Selection {
         Ok(targets)
     }
 
-    /// Check every named item against the Commons. Returns every unknown name
-    /// so one run names them all.
-    pub fn validate_items(&self, commons: &Commons) -> Vec<String> {
+    /// Resolve every named item against the Commons, accepting any unique
+    /// case-insensitive prefix. Exact names win over prefixes. Returns every
+    /// unknown or ambiguous name so one run names them all.
+    pub fn resolve_items(&mut self, commons: &Commons) -> Vec<String> {
         let mut errors = Vec::new();
 
-        for (surface, items) in &self.scope {
-            let Some(items) = items else {
+        for (surface, items) in &mut self.scope {
+            let surface = *surface;
+            let Some(raw_items) = items else {
                 continue;
             };
-            let known = match surface {
-                Surface::Skills => family_names(commons, Family::Skills),
-                Surface::Commands => family_names(commons, Family::Commands),
-                Surface::Agents => family_names(commons, Family::Agents),
+            let (known, noun): (Vec<(String, String)>, &str) = match surface {
+                Surface::Skills => (family_aliases(commons, Family::Skills), "skills entry"),
+                Surface::Commands => (family_aliases(commons, Family::Commands), "commands entry"),
+                Surface::Agents => (family_aliases(commons, Family::Agents), "agents entry"),
                 Surface::Instructions => {
                     errors.push("--only instructions takes no items".into());
                     continue;
@@ -241,28 +267,41 @@ impl Selection {
                         // report, not an unknown item.
                         continue;
                     };
-                    names
+                    (
+                        names.into_iter().map(|name| (name.clone(), name)).collect(),
+                        "MCP server",
+                    )
                 }
-                Surface::Hooks => hooks::declared_events(&commons.family_dir(commons::HOOKS)),
+                Surface::Hooks => (
+                    hooks::declared_events(&commons.family_dir(commons::HOOKS))
+                        .into_iter()
+                        .map(|name| (name.clone(), name))
+                        .collect(),
+                    "hooks/<event>.toml file",
+                ),
             };
 
-            let noun = match surface {
-                Surface::Skills => "skills entry",
-                Surface::Commands => "commands entry",
-                Surface::Agents => "agents entry",
-                Surface::Instructions => unreachable!(),
-                Surface::Mcp => "MCP server",
-                Surface::Hooks => "hooks/<event>.toml file",
-            };
-
-            for item in items {
-                if !known.contains(item) {
-                    errors.push(format!(
-                        "unknown --only item `{}:{item}` — no Commons {noun} by that name",
+            let mut resolved = BTreeSet::new();
+            for raw in raw_items.iter() {
+                let aliases = known
+                    .iter()
+                    .map(|(alias, canonical)| (alias.as_str(), canonical.as_str()));
+                match match_aliases(raw, aliases) {
+                    NameMatch::Exact(name) | NameMatch::One(name) => {
+                        resolved.insert(name.to_string());
+                    }
+                    NameMatch::Many(names) => errors.push(format!(
+                        "ambiguous --only item `{}:{raw}` — matches {}; type more characters",
+                        surface.name(),
+                        names.join(", ")
+                    )),
+                    NameMatch::None => errors.push(format!(
+                        "unknown --only item `{}:{raw}` — no Commons {noun} by that name",
                         surface.name()
-                    ));
+                    )),
                 }
             }
+            *raw_items = resolved;
         }
 
         errors
@@ -295,11 +334,11 @@ fn parse_only(
         None => (value, None),
     };
 
-    let surface = Surface::from_name(family).ok_or_else(|| {
-        format!(
-            "unknown --only family `{family}` — expected skills, commands, agents, instructions, mcp, hooks"
-        )
-    })?;
+    let family = family.trim();
+    if family.is_empty() {
+        return Err(format!("--only `{value}` has an empty family"));
+    }
+    let surface = Surface::resolve(family)?;
 
     let items = match items {
         None => None,
@@ -340,19 +379,68 @@ fn parse_only(
     Ok(())
 }
 
-fn family_names(commons: &Commons, family: Family) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
+fn family_aliases(commons: &Commons, family: Family) -> Vec<(String, String)> {
+    let mut aliases = Vec::new();
     for entry in commons.scan(family).entries {
-        names.insert(entry.name);
-        names.insert(entry.file_name);
+        aliases.push((entry.name.clone(), entry.name.clone()));
+        if entry.file_name != entry.name {
+            aliases.push((entry.file_name, entry.name));
+        }
     }
-    names
+    aliases
 }
 
 fn mcp_names(commons: &Commons) -> Option<BTreeSet<String>> {
     mcp::commons_servers(&commons.root().join(commons::MCP))
         .ok()
         .map(|servers| servers.keys().cloned().collect())
+}
+
+/// The result of resolving one typed name against a set of candidates.
+enum NameMatch<'a> {
+    Exact(&'a str),
+    One(&'a str),
+    Many(Vec<&'a str>),
+    None,
+}
+
+/// Resolve `input` against `(alias, canonical)` pairs. Exact matches win, then
+/// a unique case-insensitive prefix. Several matches are `Many` so the caller
+/// can ask for more characters.
+fn match_aliases<'a>(
+    input: &str,
+    aliases: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> NameMatch<'a> {
+    let needle = input.to_lowercase();
+    let mut exact = Vec::new();
+    let mut prefix = Vec::new();
+
+    for (alias, canonical) in aliases {
+        let lower = alias.to_lowercase();
+        if lower == needle {
+            if !exact.contains(&canonical) {
+                exact.push(canonical);
+            }
+        } else if lower.starts_with(&needle) && !prefix.contains(&canonical) {
+            prefix.push(canonical);
+        }
+    }
+
+    if exact.len() == 1 {
+        NameMatch::Exact(exact[0])
+    } else if exact.len() > 1 {
+        exact.sort();
+        NameMatch::Many(exact)
+    } else {
+        match prefix.len() {
+            0 => NameMatch::None,
+            1 => NameMatch::One(prefix[0]),
+            _ => {
+                prefix.sort();
+                NameMatch::Many(prefix)
+            }
+        }
+    }
 }
 
 /// Whether a link or file name matches one of the selected item names. Markdown

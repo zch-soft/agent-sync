@@ -87,11 +87,12 @@ agent-sync sync --only skills --strict                  # audit everything first
 ```
 
 `--agent` and `--only` repeat; `--only FAMILY[:ITEM,...]` accepts families `skills`,
-`commands`, `agents`, `instructions`, `mcp` and `hooks`. `--root` applies to the one
-selected agent and may repeat for multiple profiles; every path of that agent moves
-under the alternate root. Unselected scope is not surveyed unless `--strict` audits it
-before writing. The complete rules are in
-[docs/selective-sync.md](docs/selective-sync.md).
+`commands`, `agents`, `instructions`, `mcp` and `hooks`. Family and item names accept
+any unique, case-insensitive prefix (`s` for skills, `ima` for `ima-skills`); an
+ambiguous or unknown prefix is an error. `--root` applies to the one selected agent and
+may repeat for multiple profiles; every path of that agent moves under the alternate
+root. Unselected scope is not surveyed unless `--strict` audits it before writing. The
+complete rules are in [docs/selective-sync.md](docs/selective-sync.md).
 
 ## Agents
 

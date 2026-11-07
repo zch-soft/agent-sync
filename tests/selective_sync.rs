@@ -304,6 +304,48 @@ fn alternate_root_is_refused_for_a_custom_target() {
 }
 
 #[test]
+fn family_and_item_names_accept_unique_case_insensitive_prefixes() {
+    let f = machine();
+    f.commons_file("AGENTS.md", "# shared instructions\n");
+    f.commons_skill("research");
+    f.commons_skill("ima-skills");
+    f.commons_skill("ima-notes");
+    f.commons_mcp(r#"{"mcpServers": {"serena": {"command": "uvx"}}}"#);
+
+    // Single-letter family and upper-case item prefixes.
+    f.run(&["sync", "--only", "I"]).assert_clean();
+    assert!(
+        f.contents(".claude/CLAUDE.md")
+            .contains("@~/.agents/AGENTS.md")
+    );
+
+    f.run(&["sync", "--only", "S:RES", "--only", "MCP:SER"])
+        .assert_clean();
+    assert!(f.is_symlink(".claude/skills/research"));
+    assert!(f.json(".claude.json")["mcpServers"]["serena"].is_object());
+    assert!(!f.present(".claude/skills/ima-skills"));
+
+    // An ambiguous prefix names every candidate and writes nothing.
+    let out = f.run(&["sync", "--only", "skills:IMA"]);
+    out.assert_code(1)
+        .assert_stderr_has("ambiguous")
+        .assert_stderr_has("ima-notes")
+        .assert_stderr_has("ima-skills");
+    assert!(!f.present(".claude/skills/ima-skills"));
+
+    // Exact names win over prefixes.
+    f.commons_skill("ima");
+    f.run(&["sync", "--only", "skills:IMA"]).assert_clean();
+    assert!(f.is_symlink(".claude/skills/ima"));
+    assert!(!f.present(".claude/skills/ima-skills"));
+
+    f.run(&["sync", "--only", "skills:ZZZ"])
+        .assert_code(1)
+        .assert_stderr_has("unknown")
+        .assert_stderr_has("ZZZ");
+}
+
+#[test]
 fn repeated_agents_and_selectors_merge() {
     let f = machine();
     f.commons_skill("research");

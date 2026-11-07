@@ -2387,3 +2387,20 @@ root, family and item selection, including profiles of agents such as Hermes, an
 Decided-by: human (selector shape, one agent with multiple roots, every path under the
 alternate root, local by default with `--strict`); agent (validation order, filtering
 layers, labels, test set)
+
+## 2026-11-07 — Selective-sync names accept unique case-insensitive prefixes
+
+`--only` family and item names may be abbreviated to any prefix that matches exactly
+one candidate, compared case-insensitively. An exact match always wins over prefixes,
+so `skills:ima` selects `ima` even when `ima-skills` exists. A prefix matching several
+candidates, or none, is an error that lists the candidates (or the expected families)
+instead of choosing silently. The same resolution applies to skills, commands, agents,
+MCP server names and hook events.
+
+Evidence: full names made repeated selective invocations verbose. The six family names
+are pairwise distinct at one character, and item names are already unique in the
+Commons. `tests/selective_sync.rs` pins `s`, `S:RES`, `MCP:SER`, exact-over-prefix,
+ambiguous and unknown cases.
+
+Decided-by: human (prefix abbreviations, exact-match precedence, error on ambiguity);
+agent (case-folding, candidate listing, implementation)

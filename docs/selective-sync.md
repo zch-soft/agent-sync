@@ -53,6 +53,24 @@ Unknown families, empty item lists, unknown item names, and
 `--only instructions:<item>` are errors. They are reported before the lock and before
 any write.
 
+## Abbreviated names
+
+Family and item names accept any prefix long enough to be unique, compared
+case-insensitively:
+
+```sh
+agent-sync sync --only s                 # skills
+agent-sync sync --only SKILLS:RES        # research
+agent-sync sync --only mcp:SER           # server named serena
+agent-sync sync --only hooks:sess        # SessionStart
+```
+
+An exact name always wins: `skills:ima` selects `ima` even when `ima-skills` also
+exists. A prefix that matches more than one candidate is an error listing the
+candidates, so type more characters; a prefix that matches none is an unknown-name
+error. The same rules apply to skills, commands, agents, MCP server names and hook
+events.
+
 ## Alternate roots
 
 `--root` supplies an alternate config root for **exactly one** selected agent. It is the

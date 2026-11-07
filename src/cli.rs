@@ -36,6 +36,7 @@ pub struct SyncArgs {
     pub root: Vec<String>,
     /// Sync only a surface, or named items inside it:
     /// skills[:ITEM[,ITEM...]], commands, agents, instructions, mcp, hooks.
+    /// Family and item names accept any unique, case-insensitive prefix.
     #[arg(long = "only", value_name = "FAMILY[:ITEM[,ITEM...]]")]
     pub only: Vec<String>,
     /// Survey every Target and surface before writing, not just the selection.

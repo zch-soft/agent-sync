@@ -163,7 +163,7 @@ pub fn run(env: &Env, config: &Config, r: &mut Reporter, args: &SyncArgs) -> i32
         return EXIT_ERROR;
     }
 
-    let selection = match Selection::parse(args, env) {
+    let mut selection = match Selection::parse(args, env) {
         Ok(selection) => selection,
         Err(e) => {
             r.problem(e);
@@ -181,7 +181,7 @@ pub fn run(env: &Env, config: &Config, r: &mut Reporter, args: &SyncArgs) -> i32
         }
     };
 
-    let item_errors = selection.validate_items(&commons);
+    let item_errors = selection.resolve_items(&commons);
     if !item_errors.is_empty() {
         for error in item_errors {
             r.problem(error);
