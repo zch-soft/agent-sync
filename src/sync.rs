@@ -153,6 +153,31 @@ impl Plan {
             problems,
         }
     }
+
+    /// How many items `--force` would change. Used to decide whether the run
+    /// needs `--yes`; zero means `--force` is a no-op.
+    fn forced_count(&self, force: bool) -> usize {
+        if !force {
+            return 0;
+        }
+        let links: usize = self
+            .links
+            .iter()
+            .flat_map(|plan| &plan.items)
+            .filter(|item| link::forceable(item))
+            .count();
+        let instructions = self
+            .instructions
+            .iter()
+            .filter(|item| instructions::forceable(item))
+            .count();
+        let rendered = self
+            .rendered
+            .iter()
+            .filter(|item| render::forceable(item))
+            .count();
+        links + instructions + rendered
+    }
 }
 
 pub fn run(env: &Env, config: &Config, r: &mut Reporter, args: &SyncArgs) -> i32 {
@@ -262,16 +287,31 @@ pub fn run(env: &Env, config: &Config, r: &mut Reporter, args: &SyncArgs) -> i32
 
     let mut changes = 0usize;
     if plan.problems.is_empty() {
+        // `--force` may change states sync normally leaves alone. Without
+        // `--yes`, print that plan and stop before writing; `--dry-run`
+        // previews it the same way.
+        let forced = plan.forced_count(args.force);
+        let refusing = args.force && !args.yes && !dry_run && forced > 0;
+        let preview = dry_run || refusing;
+
         // Phase 2 — execute the plan (a dry run prints it instead). Hooks are
         // written after MCP because Gemini keeps both in one settings file,
         // and each family re-reads it before merging.
         for link_plan in &plan.links {
-            changes += sync_target(link_plan, env.home(), r, dry_run);
+            changes += sync_target(link_plan, env.home(), r, preview, args.force);
         }
-        changes += sync_instructions(env, &plan.instructions, r, dry_run);
-        changes += sync_mcp(&plan.mcp, r, dry_run);
-        changes += sync_rendered(&plan.rendered, r, dry_run);
-        changes += sync_hooks(&plan.hooks, r, dry_run);
+        changes += sync_instructions(env, &plan.instructions, r, preview, args.force);
+        changes += sync_mcp(&plan.mcp, r, preview);
+        changes += sync_rendered(&plan.rendered, r, preview, args.force);
+        changes += sync_hooks(&plan.hooks, r, preview);
+
+        if refusing {
+            r.blank();
+            r.problem(format!(
+                "refusing to force {forced} change(s) without --yes — rerun with --yes, or preview with --dry-run"
+            ));
+            return EXIT_ERROR;
+        }
     } else {
         // A survey problem anywhere in the selection stops the whole run before
         // its first write, so a config error can never leave a half-synced
@@ -306,7 +346,7 @@ pub fn run(env: &Env, config: &Config, r: &mut Reporter, args: &SyncArgs) -> i32
 
 /// The rendered family: whole files generated for agents that cannot take a
 /// symlink, each carrying the Marker that makes it ours to replace.
-fn sync_rendered(items: &[render::Item], r: &mut Reporter, dry_run: bool) -> usize {
+fn sync_rendered(items: &[render::Item], r: &mut Reporter, dry_run: bool, force: bool) -> usize {
     let noteworthy: Vec<&render::Item> = items
         .iter()
         .filter(|i| i.state != render::State::Managed)
@@ -317,18 +357,23 @@ fn sync_rendered(items: &[render::Item], r: &mut Reporter, dry_run: bool) -> usi
 
     r.line("rendered commands");
     for item in &noteworthy {
+        let note = if force && render::forceable(item) {
+            item.force_note()
+        } else {
+            item.state.note()
+        };
         r.line(format!(
             "  {:<10} {} → {} — {}",
             item.state.label(),
             item.name,
             item.target,
-            item.state.note()
+            note
         ));
     }
 
     let changing: Vec<&&render::Item> = noteworthy
         .iter()
-        .filter(|i| i.state.needs_change())
+        .filter(|i| i.state.needs_change() || (force && render::forceable(i)))
         .collect();
     if changing.is_empty() || dry_run {
         return changing.len();
@@ -336,7 +381,13 @@ fn sync_rendered(items: &[render::Item], r: &mut Reporter, dry_run: bool) -> usi
 
     let mut written = 0usize;
     for item in &changing {
-        match render::apply(item) {
+        let forced = force && render::forceable(item);
+        let result = if forced {
+            render::apply_forced(item)
+        } else {
+            render::apply(item)
+        };
+        match result {
             Ok(()) => written += 1,
             Err(e) => r.problem(e.to_string()),
         }
@@ -520,6 +571,7 @@ fn sync_instructions(
     items: &[instructions::Item],
     r: &mut Reporter,
     dry_run: bool,
+    force: bool,
 ) -> usize {
     let noteworthy: Vec<&instructions::Item> = items
         .iter()
@@ -540,7 +592,9 @@ fn sync_instructions(
         if failed.contains(&item.target.as_str()) {
             continue;
         }
-        if !item.state.needs_change() {
+        let forced = force && instructions::forceable(item);
+        let changing = item.state.needs_change() || forced;
+        if !changing {
             r.line(format!(
                 "  {:<9} {} — {}",
                 item.state.label(),
@@ -549,15 +603,42 @@ fn sync_instructions(
             ));
             continue;
         }
+        let note = if forced { item.force_note() } else { "" };
         if dry_run {
-            r.line(format!("  {:<9} {}", item.state.label(), item.target));
+            if forced {
+                r.line(format!(
+                    "  {:<9} {} — {note}",
+                    item.state.label(),
+                    item.target
+                ));
+            } else {
+                r.line(format!("  {:<9} {}", item.state.label(), item.target));
+            }
             changed += 1;
-        } else if let Err(e) = instructions::apply(env, item) {
-            r.problem(format!("cannot write {}: {e}", item.path.display()));
-            failed.push(&item.target);
         } else {
-            r.line(format!("  {:<9} {}", item.state.label(), item.target));
-            changed += 1;
+            let result = if forced {
+                instructions::apply_forced(env, item)
+            } else {
+                instructions::apply(env, item)
+            };
+            match result {
+                Err(e) => {
+                    r.problem(format!("cannot write {}: {e}", item.path.display()));
+                    failed.push(&item.target);
+                }
+                Ok(()) => {
+                    if forced {
+                        r.line(format!(
+                            "  {:<9} {} — {note}",
+                            item.state.label(),
+                            item.target
+                        ));
+                    } else {
+                        r.line(format!("  {:<9} {}", item.state.label(), item.target));
+                    }
+                    changed += 1;
+                }
+            }
         }
     }
 
@@ -566,7 +647,13 @@ fn sync_instructions(
 
 /// Report — and unless this is a dry run, apply — one Target's items. Returns
 /// how many of them changed the filesystem.
-fn sync_target(plan: &LinkPlan, home: &Path, r: &mut Reporter, dry_run: bool) -> usize {
+fn sync_target(
+    plan: &LinkPlan,
+    home: &Path,
+    r: &mut Reporter,
+    dry_run: bool,
+    force: bool,
+) -> usize {
     let interesting: Vec<&Item> = plan
         .items
         .iter()
@@ -580,8 +667,14 @@ fn sync_target(plan: &LinkPlan, home: &Path, r: &mut Reporter, dry_run: bool) ->
     let mut changed = 0;
 
     for item in interesting {
-        let note = item.state.note();
-        if !item.state.needs_change() {
+        let forced = force && link::forceable(item);
+        let changing = item.state.needs_change() || forced;
+        let note = if forced {
+            item.force_note()
+        } else {
+            item.state.note()
+        };
+        if !changing {
             r.line(format!(
                 "  {:<9} {} — {note}",
                 item.state.label(),
@@ -591,16 +684,40 @@ fn sync_target(plan: &LinkPlan, home: &Path, r: &mut Reporter, dry_run: bool) ->
         }
 
         if dry_run {
-            r.line(format!("  {:<9} {}", item.state.label(), item.name));
+            if forced {
+                r.line(format!(
+                    "  {:<9} {} — {note}",
+                    item.state.label(),
+                    item.name
+                ));
+            } else {
+                r.line(format!("  {:<9} {}", item.state.label(), item.name));
+            }
             changed += 1;
-        } else if let Err(e) = link::apply(item) {
-            r.problem(format!(
-                "cannot fix {}: {e}",
-                item.path.strip_prefix(home).unwrap_or(&item.path).display()
-            ));
         } else {
-            r.line(format!("  {:<9} {}", item.state.label(), item.name));
-            changed += 1;
+            let result = if forced {
+                link::apply_forced(item)
+            } else {
+                link::apply(item)
+            };
+            match result {
+                Err(e) => r.problem(format!(
+                    "cannot fix {}: {e}",
+                    item.path.strip_prefix(home).unwrap_or(&item.path).display()
+                )),
+                Ok(()) => {
+                    if forced {
+                        r.line(format!(
+                            "  {:<9} {} — {note}",
+                            item.state.label(),
+                            item.name
+                        ));
+                    } else {
+                        r.line(format!("  {:<9} {}", item.state.label(), item.name));
+                    }
+                    changed += 1;
+                }
+            }
         }
     }
 
@@ -648,7 +765,7 @@ mod tests {
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let mut r = Reporter::new(&mut out, &mut err);
-        sync_instructions(&env, &items, &mut r, false);
+        sync_instructions(&env, &items, &mut r, false, false);
 
         assert_eq!(r.problem_count(), 1);
         assert_eq!(

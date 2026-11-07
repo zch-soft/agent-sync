@@ -27,6 +27,11 @@ item. `sync` acts only on the states marked **actionable** below, with the one
 For a `foreign` link the human report also prints the absolute path the link
 resolves to, since the name alone says nothing about the destination.
 
+`sync --force --yes` can override the states sync normally leaves alone:
+`variant-identical`, `variant` and `foreign` links with a Commons entry,
+forceable instructions conflicts/foreign entries, and foreign rendered commands.
+See [force-sync.md](force-sync.md) for the exact scope and the `--yes` gate.
+
 ## instructions (AGENTS.md)
 
 | State | Meaning | `sync` |

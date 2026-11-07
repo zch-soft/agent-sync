@@ -130,3 +130,5 @@ agent-sync sync --only skills:research --dry-run
 - With an item filter, rendered-command orphan pruning is skipped: an orphan has no
   Commons name to select. A whole-family `--only commands` still prunes them.
 - A Native agent's legacy fan-out directory is pruned only for selected skill names.
+
+To override a state sync normally leaves alone, see [force-sync.md](force-sync.md).

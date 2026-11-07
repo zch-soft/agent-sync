@@ -94,6 +94,21 @@ may repeat for multiple profiles; every path of that agent moves under the alter
 root. Unselected scope is not surveyed unless `--strict` audits it before writing. The
 complete rules are in [docs/selective-sync.md](docs/selective-sync.md).
 
+## Force
+
+`--force` overrides states sync normally leaves alone: Variant and Foreign links
+with a Commons entry, forceable instructions Conflicts/Foreign, and foreign
+rendered commands. It prints what it would delete or overwrite and refuses to
+write without `--yes`; `--dry-run` previews the same plan:
+
+```sh
+agent-sync sync --force --dry-run
+agent-sync sync --force --yes
+```
+
+MCP and hook `foreign` entries stay report-only. The complete list is in
+[docs/force-sync.md](docs/force-sync.md).
+
 ## Agents
 
 Claude Code, Codex, opencode, pi, oh-my-pi, OpenClaw, Hermes, Gemini CLI, Cursor, Windsurf,

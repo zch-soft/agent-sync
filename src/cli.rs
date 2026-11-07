@@ -42,6 +42,14 @@ pub struct SyncArgs {
     /// Survey every Target and surface before writing, not just the selection.
     #[arg(long)]
     pub strict: bool,
+    /// Force states sync normally leaves alone: Variant, VariantIdentical and
+    /// Foreign links, forceable instructions conflicts, and foreign rendered
+    /// files. MCP and hook foreign entries are still left alone.
+    #[arg(long)]
+    pub force: bool,
+    /// Confirm the forced overwrites without prompting. Requires --force.
+    #[arg(long, short = 'y', requires = "force")]
+    pub yes: bool,
 }
 
 #[derive(Subcommand, Debug)]

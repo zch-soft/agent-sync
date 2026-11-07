@@ -44,6 +44,7 @@ The avoid-list is enforced by `tests/vocabulary.rs` against string literals in
 | What is the current version building? | highest `.scratch/agentstow-v*/spec.md` |
 | What is left to do? | `.scratch/<effort>/issues/NN-*.md` |
 | How do I sync only part of the Commons? | `docs/selective-sync.md` |
+| How do I force-overwrite states sync normally leaves alone? | `docs/force-sync.md` |
 | How does each family sync, including instructions routes? | `docs/sync-mechanisms.md` |
 | What does a `status` state mean? | `docs/status-states.md` |
 | How is a release cut and verified? | `docs/release-runbook.md` |

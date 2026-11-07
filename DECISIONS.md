@@ -2404,3 +2404,23 @@ ambiguous and unknown cases.
 
 Decided-by: human (prefix abbreviations, exact-match precedence, error on ambiguity);
 agent (case-folding, candidate listing, implementation)
+
+## 2026-11-07 — Force overrides Commons-defined states; `--yes` gates the writes
+
+`sync --force` covers only states that have a Commons definition: link
+`variant-identical`, `variant` and `foreign`; instruction `conflict`/`foreign` on
+Symlink, Rules-dir and Import-line routes; and rendered-command `foreign`. An
+Include-entry conflict is not forced because it would require rewriting an agent
+config agent-sync does not own. MCP and hook `foreign`/`stranded` stay report-only: a
+foreign MCP name has no Commons definition to write, and deleting another tool's server
+or hook is not an overwrite. A link with no Commons entry is never deleted. `--force`
+without `--yes` prints the full plan and refuses before writing; `--dry-run` previews
+it, and `--yes` without `--force` is a CLI error.
+
+Evidence: the owner asked for forced overwrites but chose the scope limited to
+Commons-defined content; `tests/force_sync.rs` pins each forced state, the refusal, the
+preview, selection scoping and the untouched MCP/hook/extra cases.
+
+Decided-by: human (scope, confirmation through `--yes`, dry-run preview); agent
+(per-state forceability, inclusion of import-line conflicts, exclusion of
+include-entry conflicts)

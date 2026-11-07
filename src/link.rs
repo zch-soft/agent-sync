@@ -401,6 +401,62 @@ pub fn apply(item: &Item) -> io::Result<()> {
     }
 }
 
+/// Whether `--force` makes this item actionable. A Foreign link with no Commons
+/// entry is not forceable: there is nothing to point it at, so it stays a
+/// bystander.
+pub fn forceable(item: &Item) -> bool {
+    item.canonical.is_some()
+        && matches!(
+            item.state,
+            State::VariantIdentical | State::VariantDiverged | State::Foreign
+        )
+}
+
+impl Item {
+    /// The report note for a forced replacement. The normal notes say "left
+    /// alone", which is exactly what `--force` overrides.
+    pub fn force_note(&self) -> &'static str {
+        match self.state {
+            State::VariantIdentical => "force: replace the identical copy with the Commons link",
+            State::VariantDiverged => "force: discard the local copy and link the Commons",
+            State::Foreign => "force: replace the foreign link with the Commons link",
+            _ => self.state.note(),
+        }
+    }
+}
+
+/// Replace what `--force` was asked to override: a real Variant (identical or
+/// divergent) or a Foreign link, followed by the canonical Commons link.
+pub fn apply_forced(item: &Item) -> io::Result<()> {
+    let text = item
+        .canonical
+        .as_ref()
+        .expect("a forceable item names a Commons entry");
+    match item.state {
+        State::VariantIdentical | State::VariantDiverged => {
+            remove_real(&item.path)?;
+            create_symlink(text, &item.path)
+        }
+        State::Foreign => {
+            remove_symlink(&item.path)?;
+            create_symlink(text, &item.path)
+        }
+        _ => apply(item),
+    }
+}
+
+/// Remove what is actually there: a link, a real directory tree, or a file.
+fn remove_real(path: &Path) -> io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        remove_symlink(path)
+    } else if meta.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
 /// Survey a legacy fan-out directory — one a Native agent still reads beside
 /// the Commons. Prune-only: every link of ours, live or dangling, is a
 /// [`State::Duplicate`] to remove; Foreign links and real objects are not even

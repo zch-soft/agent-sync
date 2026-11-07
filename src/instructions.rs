@@ -778,3 +778,50 @@ fn append_import(item: &Item) -> std::io::Result<()> {
     body.push('\n');
     fs::write(&item.path, body)
 }
+
+/// Whether `--force` may replace this instructions item. An Include-entry
+/// conflict is the agent's own config file of the wrong shape; rewriting the
+/// whole document would destroy settings agent-sync does not own, so it stays
+/// out of force.
+pub fn forceable(item: &Item) -> bool {
+    item.include.is_none() && matches!(item.state, State::Conflict | State::Foreign)
+}
+
+impl Item {
+    pub fn force_note(&self) -> &'static str {
+        if self.import_line.is_some() {
+            "force: replace the link with the import line"
+        } else {
+            "force: replace with the Commons link"
+        }
+    }
+}
+
+/// Force a Conflict or Foreign item into the chosen route's shape.
+pub fn apply_forced(env: &Env, item: &Item) -> std::io::Result<()> {
+    match item.state {
+        State::Conflict if item.import_line.is_some() => {
+            crate::link::remove_symlink(&item.path)?;
+            append_import(item)
+        }
+        State::Conflict | State::Foreign if item.link_text.is_some() => {
+            remove_destination(&item.path)?;
+            if let Some(parent) = item.path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            crate::link::create_symlink(item.link_text.as_ref().expect("a link route"), &item.path)
+        }
+        _ => apply(env, item),
+    }
+}
+
+fn remove_destination(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        crate::link::remove_symlink(path)
+    } else if meta.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
